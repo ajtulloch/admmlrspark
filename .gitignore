@@ -1,0 +1,12 @@
+target/
+/.lib/
+
+*~
+/.ensime
+
+/.cache
+/.classpath
+/.project
+/.settings/
+.ensime
+.ensime_lucene
