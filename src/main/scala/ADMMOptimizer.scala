@@ -46,27 +46,29 @@ class ADMMOptimizer(
   private def parallelXUpdate(state: ADMMState): ADMMState = {
     val f = new DiffFunction[DenseVector[Double]] {
       def calculate(x: DenseVector[Double]) = {
-        val lossFunction = (x: Vector) => {
+        val vx = Vector(x.data)
+        val objective = {
           val loss = state.points
-            .map(lp => log1p(exp(-lp.label * (x dot Vector(lp.features)))))
+            .map(lp => log1p(exp(-lp.label * (vx dot Vector(lp.features)))))
             .sum
-          val regularizer = squaredNorm(x - state.z + state.u)
+          val regularizer = squaredNorm(vx - state.z + state.u)
           loss + rho / 2 * regularizer
         }
 
-        val gradientFunction = (x: Vector) => {
+        val gradient = {
           val logit = (v: Double) => 1 + exp(-v)
           val lossGradient = state.points
             .map(lp => {
               lp.label *
               Vector(lp.features) *
-              (logit(lp.label * (x dot Vector(lp.features))) - 1)
+              (logit(lp.label * (vx dot Vector(lp.features))) - 1)
             })
             .reduce(_ + _)
-          val regularizerGradient = 2 * (x - state.z + state.u)
+          val regularizerGradient = 2 * (vx - state.z + state.u)
           lossGradient + rho / 2 * regularizerGradient
         }
-        (lossFunction(x), gradientFunction(x))
+
+        (objective, gradient)
       }
     }
 
