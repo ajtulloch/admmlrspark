@@ -126,9 +126,9 @@ libraryDependencies ++= Seq (
   // -- network --
    // "net.databinder.dispatch" %% "dispatch-core" % "0.9.2",
   // -- testing --
-  // "org.scalacheck" %% "scalacheck" % "1.10.0" % "test",
-  // "org.specs2" %% "specs2" % "1.13",
-  // "org.scalatest" % "scalatest_2.10" % "2.0.M5b"
+  "org.scalacheck" %% "scalacheck" % "1.10.0" % "test",
+  // "org.specs2" %% "specs2" %o "1.13",
+  "org.scalatest" %% "scalatest" % "1.9.2" % "test",
   "org.apache.spark" %% "spark-core" % "0.8.1-incubating",
   "org.apache.spark" %% "spark-mllib" % "0.8.1-incubating",
   "org.scalanlp" % "breeze-math_2.9.2" % "0.2",
