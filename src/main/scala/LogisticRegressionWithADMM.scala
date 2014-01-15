@@ -15,7 +15,7 @@ case class SparseLogisticRegressionADMMPrimalUpdater(
   rho: Double,
   lbfgsMaxNumIterations: Int = 5,
   lbfgsHistory: Int = 10,
-  lbfgsTolerance: Double = 1E-4) extends ADMMPrimalUpdater {
+  lbfgsTolerance: Double = 1E-4) extends ADMMUpdater {
 
   def xUpdate(state: ADMMState): ADMMState = {
       // Our convex objective function that we seek to optimize
@@ -114,9 +114,8 @@ class SparseLogisticRegressionWithADMM(
 
   override def createModel(
     weights: Array[Double],
-    intercept: Double): LogisticRegressionModel = {
+    intercept: Double): LogisticRegressionModel =
     new LogisticRegressionModel(weights, intercept)
-  }
 }
 
 object SparseLogisticRegressionWithADMM {

@@ -13,24 +13,12 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.util.Vector
 import scala.math.{abs, exp, log, log1p, max, min, pow}
 
-
-trait ADMMPrimalUpdater {
-  def xUpdate(state: ADMMState): ADMMState
-
-  def zUpdate(states: RDD[ADMMState]): RDD[ADMMState]
-
-  def uUpdate(state: ADMMState): ADMMState = {
-    state.copy(u = state.u + state.x - state.z)
-  }
-}
-
 case class SVMADMMPrimalUpdater(
   rho: Double,
   cee: Double,
   lbfgsMaxNumIterations: Int = 5,
   lbfgsHistory: Int = 10,
-  lbfgsTolerance: Double = 1E-4) extends ADMMPrimalUpdater {
-
+  lbfgsTolerance: Double = 1E-4) extends ADMMUpdater {
 
   def xUpdate(state: ADMMState): ADMMState = {
     // Our convex objective function that we seek to optimize
@@ -90,12 +78,12 @@ case class SVMADMMPrimalUpdater(
   }
 }
 
-case class LassoRegressionADMMPrimalUpdater(
+case class LassoRegressionADMMUpdater(
   rho: Double,
   lambda: Double,
   sc: SparkContext,
   ridgeNumPartitions: Int,
-  ridgeNumIterations: Int) extends ADMMPrimalUpdater {
+  ridgeNumIterations: Int) extends ADMMUpdater {
   def xUpdate(state: ADMMState): ADMMState = {
     // Section (8.2.1) from
     //http://www.stanford.edu/~boyd/papers/pdf/admm_distr_stats.pdf
@@ -141,7 +129,7 @@ case class LassoRegressionADMMPrimalUpdater(
 
 class ADMMOptimizer(
   val numIterations: Int,
-  val updater: ADMMPrimalUpdater)
+  val updater: ADMMUpdater)
     extends Optimizer with Logging with Serializable {
 
   override def optimize(
