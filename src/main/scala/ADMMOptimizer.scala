@@ -63,6 +63,18 @@ case class ADMMState(
   }
 }
 
+object ADMMState {
+  def apply(points: Array[LabeledPoint]): ADMMState = {
+    val numFeatures = points.head.features.length
+    new ADMMState(
+      points = points,
+      x = zeroes(numFeatures),
+      z = zeroes(numFeatures),
+      u = zeroes(numFeatures)
+    )
+  }
+}
+
 class ADMMOptimizer(
   val numIterations: Int,
   val lambda: Double,
@@ -72,7 +84,6 @@ class ADMMOptimizer(
   override def optimize(
     data: RDD[(Double, Array[Double])],
     initialWeights: Array[Double]): Array[Double] = {
-    val numFeatures = data.first._2.length
     val numPartitions = data.partitions.length
     // Hash each datapoint to a partition
 
@@ -87,13 +98,7 @@ class ADMMOptimizer(
       .groupBy(lp => {
         lp.hashCode() % numPartitions
       })
-      .map(ip => {
-        new ADMMState(
-          ip._2.toArray,
-          zeroes(numFeatures),
-          zeroes(numFeatures),
-          zeroes(numFeatures))
-      })
+      .map(ip => ADMMState(ip._2.toArray))
      
     // Run numIterations of runRound
     val finalStates = (1 to numIterations).foldLeft(admmStates)((s, _) => runRound(s))
