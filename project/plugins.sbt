@@ -4,6 +4,8 @@ addSbtPlugin("com.timushev.sbt" % "sbt-updates" % "0.1.0")
 
 addSbtPlugin("org.ensime" % "ensime-sbt-cmd" % "0.1.1")
 
+addSbtPlugin("com.typesafe.sbteclipse" % "sbteclipse-plugin" % "2.1.2")
+
 // addSbtPlugin("io.spray" % "sbt-revolver" % "0.6.2")
 
 // addSbtPlugin("com.github.gseitz" % "sbt-release" % "0.6")

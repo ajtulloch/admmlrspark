@@ -14,7 +14,7 @@ object DenseVectorImplicits {
   }
 
   class RichVector(v: Vector) {
-    def squaredNorm: Double = v.elements.map(pow(_, 2)).sum
+    def squaredNorm: Double = v dot v
   }
 
   implicit def richVector(v: Vector) = new RichVector(v)

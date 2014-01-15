@@ -1,5 +1,6 @@
 package com.tulloch.admmlrspark
 
+import ADMMOptimizer._
 import DenseVectorImplicits._
 import breeze.linalg.DenseVector
 import breeze.optimize.{DiffFunction, LBFGS}
@@ -8,31 +9,92 @@ import org.apache.spark.mllib.optimization.Optimizer
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.rdd.RDD
 import org.apache.spark.util.Vector
-import scala.math.{abs, exp, log1p, max}
+import scala.math.{abs, exp, log, log1p, max, min}
+
+/**
+ * The state kept on each partition - the data points, and the x,
+ * y, u vectors at each iteration
+ */
+case class ADMMState(
+  val points: Array[LabeledPoint],
+  val x: Vector,
+  val z: Vector,
+  val u: Vector)
+    extends Logging {
+
+  def objective(rho: Double)(weights: Vector): Double = {
+    val lossObjective = points
+      .map(lp => {
+        val margin = lp.label * (weights dot Vector(lp.features))
+        -logPhi(margin)
+      })
+      .sum
+
+    val regularizerObjective = (weights - z + u).squaredNorm
+    val totalObjective = lossObjective + rho / 2 * regularizerObjective
+    totalObjective
+  }
+
+  def gradient(rho: Double)(weights: Vector): Vector = {
+    val lossGradient = points
+      .map(lp => {
+        val margin = lp.label * (weights dot Vector(lp.features))
+        lp.label * Vector(lp.features) * (phi(margin) - 1)
+      })
+      .reduce(_ + _)
+
+    val regularizerGradient = 2 * (weights - z + u)
+    val totalGradient = lossGradient + rho / 2 * regularizerGradient
+    totalGradient
+  }
+
+  private def clampToRange(lower: Double, upper: Double)(margin: Double): Double =
+    min(upper, max(lower, margin))
+
+  private def logPhi(margin: Double): Double = {
+    val t = clampToRange(-10, 10)(margin)
+    math.log(1.0 / (1.0 + exp(-t)))
+    // if (t > 0) - math.log(1.0 + exp(-t)) else t - math.log(1 + exp(t)) 
+  }
+
+  private def phi(margin: Double): Double = {
+    val t = clampToRange(-10, 10)(margin)
+    if (t > 0) 1.0 / (1 + exp(-t)) else exp(t) / (1 + exp(t))
+  }
+}
 
 class ADMMOptimizer(
   val numIterations: Int,
   val lambda: Double,
   val rho: Double)
-    extends Optimizer with Logging {
+    extends Optimizer with Logging with Serializable {
 
-  /**
-   * The state kept on each partition - the data points, and the x,
-   * y, u vectors at each iteration
-   */
-  case class ADMMState(points: Array[LabeledPoint], x: Vector, z: Vector, u: Vector)
-
-  def optimize(
+  override def optimize(
     data: RDD[(Double, Array[Double])],
     initialWeights: Array[Double]): Array[Double] = {
     val numFeatures = data.first._2.length
-    // Hash each datapoint to a partition 
-    val admmStates = data
-      .map(p => LabeledPoint(p._1, p._2))
-      .groupBy(lp => lp.hashCode % data.partitions.length)
-      .map(ip => ADMMState(ip._2.toArray, zeroes(numFeatures), zeroes(numFeatures), zeroes(numFeatures)))
-      .cache() // TODO(tulloch) - does this do anything?
+    val numPartitions = data.partitions.length
+    // Hash each datapoint to a partition
 
+    // The input points are 0,1 - we map to (-1, 1) for consistency
+    // with the presentation in
+    // http://www.stanford.edu/~boyd/papers/pdf/admm_distr_stats.pdf
+    val admmStates = data
+      .map(p => {
+        val scaledLabel = 2 * p._1 - 1
+        new LabeledPoint(scaledLabel, p._2)
+      })
+      .groupBy(lp => {
+        lp.hashCode() % numPartitions
+      })
+      .map(ip => {
+        new ADMMState(
+          ip._2.toArray,
+          zeroes(numFeatures),
+          zeroes(numFeatures),
+          zeroes(numFeatures))
+      })
+     
     // Run numIterations of runRound
     val finalStates = (1 to numIterations).foldLeft(admmStates)((s, _) => runRound(s))
 
@@ -47,56 +109,51 @@ class ADMMOptimizer(
     states.map(parallelXUpdate)
 
   private def zUpdate(states: RDD[ADMMState]): RDD[ADMMState] = {
+    val numPartitions = states.partitions.length
+    val epsilon = 0.00001 // avoid division by zero for shrinkage
     val xBar = average(states.map(_.x))
     val uBar = average(states.map(_.u))
     val zNew = Vector((xBar + uBar)
       .elements
-      .map(shrinkage(lambda / rho * states.partitions.length)))
-    states.map(s => ADMMState(s.points, s.x, zNew, s.u))
+      .map(shrinkage(lambda / (rho * numPartitions + epsilon))))
+
+    states.map(state => state.copy(z = zNew))
   }
 
   private def uUpdate(states: RDD[ADMMState]): RDD[ADMMState] =
-    states.map(s => ADMMState(s.points, s.x, s.z, s.u + s.x - s.z))
+    states.map(state => state.copy(u = state.u + state.x - state.z))
 
   private def parallelXUpdate(state: ADMMState): ADMMState = {
+    // Our convex objective function that we seek to optimize
     val f = new DiffFunction[DenseVector[Double]] {
       def calculate(x: DenseVector[Double]) = {
-        val vx = Vector(x.data)
-        val objective = {
-          val loss = state.points
-            .map(lp => log1p(exp(-lp.label * (vx dot Vector(lp.features)))))
-            .sum
-          val regularizer = (vx - state.z + state.u).squaredNorm
-          loss + rho / 2 * regularizer
-        }
-
-        val gradient = {
-          val logit = (v: Double) => 1 + exp(-v)
-          val lossGradient = state.points
-            .map(lp => {
-              lp.label *
-              Vector(lp.features) *
-              (logit(lp.label * (vx dot Vector(lp.features))) - 1)
-            })
-            .reduce(_ + _)
-          val regularizerGradient = 2 * (vx - state.z + state.u)
-          lossGradient + rho / 2 * regularizerGradient
-        }
-
+        val objective = state.objective(rho)(x)
+        val gradient = state.gradient(rho)(x)
         (objective, gradient)
       }
     }
-    val xNew = new LBFGS[DenseVector[Double]].minimize(f, state.x)
 
-    ADMMState(state.points, xNew, state.z, state.u)
+    // TODO(tulloch) - it would be nice to have relative tolerance and
+    // absolute tolerance here.
+    val xNew = new LBFGS[DenseVector[Double]](maxIter=5, m=10).minimize(
+      f,
+      state.x // this is the "warm start" approach
+    )
+    state.copy(x = xNew)
   }
 
-  // Helper methods
-  private def shrinkage(kappa: Double)(v: Double) =
-    if (v != 0) max(0, (1 - kappa / abs(v))) * v else 0
-
-  private def average(updates: RDD[Vector]): Vector =
+  // Given an RDD list of vectors, computes the component-wise average vector.
+  def average(updates: RDD[Vector]): Vector = {
     updates.reduce(_ + _) / updates.count
+  }
+}
 
-  private def zeroes(n: Int) = Vector(new Array[Double](n))
+object ADMMOptimizer {
+  // Eq (4.2) in http://www.stanford.edu/~boyd/papers/pdf/admm_distr_stats.pdf
+  def shrinkage(kappa: Double)(v: Double) =
+    max(0, v - kappa) - max(0, -v - kappa)
+
+  def zeroes(n: Int) = {
+    Vector(Array.fill(n){ 0.0 })
+  }
 }
