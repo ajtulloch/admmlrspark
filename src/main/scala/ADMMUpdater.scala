@@ -26,7 +26,13 @@ object ADMMUpdater {
 
     val zNew = Vector((xBar + uBar)
       .elements
-      .map(shrinkage(lambda / (rho * numStates + epsilon))))
+      .zipWithIndex
+      .map{case(el, index) => {
+        // Eq (3) in
+        // http://intentmedia.github.io/assets/2013-10-09-presenting-at-ieee-big-data/pld_js_ieee_bigdata_2013_admm.pdf
+        // Don't regularize the intercept term
+        if (index == 0) el else shrinkage(lambda / (rho * numStates + epsilon))(el)
+      }})
 
     states.map(state => state.copy(z = zNew))
   }

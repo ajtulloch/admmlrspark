@@ -32,7 +32,9 @@ case class LassoRegressionADMMUpdater(
     val adjustedData = state.points.map{case LabeledPoint(label, features) =>
       // rescale label to recenter the features about Tikhonov prior.
       val newLabel = label - (Vector(features) dot x_0)
-      LabeledPoint(newLabel, features)
+      // RidgeRegressionWithSGD adds an intercept term for us, so
+      //remove input feature with the intercept.
+      LabeledPoint(newLabel, features.tail)
     }
 
     val ridgeRegressionData = sc.makeRDD(state.points, ridgeNumPartitions)
@@ -58,43 +60,8 @@ class LassoRegressionWithADMM(
     numIterations,
     new LassoRegressionADMMUpdater(lambda, rho, sc, ridgeNumPartitions, ridgeNumIterations))
 
-  // We don't want to penalize the intercept, so set this to false.
-  setIntercept(false)
-
-  var yMean = 0.0
-  var xColMean: DoubleMatrix = _
-  var xColSd: DoubleMatrix = _
-
-  def createModel(weights: Array[Double], intercept: Double) = {
-    val weightsMat = new DoubleMatrix(weights.length + 1, 1, (Array(intercept) ++ weights):_*)
-    val weightsScaled = weightsMat.div(xColSd)
-    val interceptScaled = yMean - (weightsMat.transpose().mmul(xColMean.div(xColSd)).get(0))
-
-    new LassoModel(weightsScaled.data, interceptScaled)
-  }
-
-  override def run(
-      input: RDD[LabeledPoint],
-      initialWeights: Array[Double])
-    : LassoModel = {
-    val nfeatures: Int = input.first.features.length
-    val nexamples: Long = input.count()
-
-    // To avoid penalizing the intercept, we center and scale the data.
-    val stats = MLUtils.computeStats(input, nfeatures, nexamples)
-    yMean = stats._1
-    xColMean = stats._2
-    xColSd = stats._3
-
-    val normalizedData = input.map { point =>
-      val yNormalized = point.label - yMean
-      val featuresMat = new DoubleMatrix(nfeatures, 1, point.features:_*)
-      val featuresNormalized = featuresMat.sub(xColMean).divi(xColSd)
-      LabeledPoint(yNormalized, featuresNormalized.toArray)
-    }
-
-    super.run(normalizedData, initialWeights)
-  }
+  def createModel(weights: Array[Double], intercept: Double) =
+    new LassoModel(weights, intercept)
 }
 
 object LassoRegressionWithADMM {
