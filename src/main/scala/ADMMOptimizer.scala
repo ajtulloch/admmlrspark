@@ -1,6 +1,5 @@
 package com.tulloch.admmlrspark
 
-import ADMMOptimizer._
 import DenseVectorImplicits._
 import breeze.linalg.DenseVector
 import breeze.optimize.{DiffFunction, LBFGS}
@@ -8,7 +7,6 @@ import org.apache.spark.Logging
 import org.apache.spark.SparkContext
 import org.apache.spark.mllib.optimization.Optimizer
 import org.apache.spark.mllib.regression.LabeledPoint
-import org.apache.spark.mllib.regression.RidgeRegressionWithSGD
 import org.apache.spark.rdd.RDD
 import org.apache.spark.util.Vector
 import scala.math.{abs, exp, log, log1p, max, min, pow}
@@ -78,41 +76,6 @@ case class SVMADMMPrimalUpdater(
   }
 }
 
-case class LassoRegressionADMMUpdater(
-  rho: Double,
-  lambda: Double,
-  sc: SparkContext,
-  ridgeNumPartitions: Int,
-  ridgeNumIterations: Int) extends ADMMUpdater {
-  def xUpdate(state: ADMMState): ADMMState = {
-    // Section (8.2.1) from
-    //http://www.stanford.edu/~boyd/papers/pdf/admm_distr_stats.pdf
-
-    // ||Ax - b||^2 + lambda ||x - x_0||^2
-    // let z = x - x_0
-    // ||A(z + x_0) - b||^2 + lambda ||z||^2
-    // ||A(z) + (b - Ax_0)||^2 = lambda ||z||^2
-    // -> z = (A^T A + lambdaI)^-1 (A^T (b - Ax_0))
-    // -> x = x_0 + (A^T A + lambdaI)^-1 (A^T (b - Ax_0))
-    
-    val x_0 = state.z - state.u
-    val adjustedData = state.points.map{case LabeledPoint(label, features) =>
-      // rescale label to recenter the features about Tikhonov prior.
-      val newLabel = label - (Vector(features) dot x_0)
-      // remove intercept (this is added by the RidgeRegression routine)
-      val newFeatures = features.tail
-      LabeledPoint(newLabel, features.tail)
-    }
-
-    val ridgeRegressionData = sc.makeRDD(state.points, ridgeNumPartitions)
-    val ridgeSolution = RidgeRegressionWithSGD.train(ridgeRegressionData, ridgeNumIterations)
-    state.copy(x = x_0 + Vector(ridgeSolution.weights))
-  }
-
-  def zUpdate(states: RDD[ADMMState]): RDD[ADMMState] =
-    ADMMUpdater.linearZUpdate(lambda = lambda, rho = rho)(states)
-}
-
 class ADMMOptimizer(
   val numIterations: Int,
   val updater: ADMMUpdater)
@@ -143,7 +106,7 @@ class ADMMOptimizer(
       .foldLeft(admmStates)((s, _) => runRound(s))
 
     // return average of final weight vectors across the partitions
-    average(finalStates.map(_.x)).elements
+    ADMMUpdater.average(finalStates.map(_.x)).elements
   }
 
   private def runRound(states: RDD[ADMMState]): RDD[ADMMState] = {
@@ -158,11 +121,4 @@ class ADMMOptimizer(
   }
 }
 
-object ADMMOptimizer {
-  // Eq (4.2) in http://www.stanford.edu/~boyd/papers/pdf/admm_distr_stats.pdf
 
-  // Given an RDD list of vectors, computes the component-wise average vector.
-  def average(updates: RDD[Vector]): Vector = {
-    updates.reduce(_ + _) / updates.count
-  }
-}

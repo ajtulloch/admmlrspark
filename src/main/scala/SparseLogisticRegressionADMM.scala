@@ -1,6 +1,5 @@
 package com.tulloch.admmlrspark
 
-import ADMMOptimizer._
 import DenseVectorImplicits._
 import breeze.linalg.DenseVector
 import breeze.optimize.{DiffFunction, LBFGS}
@@ -38,10 +37,6 @@ case class SparseLogisticRegressionADMMPrimalUpdater(
 
   def zUpdate(states: RDD[ADMMState]): RDD[ADMMState] = {
     ADMMUpdater.linearZUpdate(lambda = lambda, rho = rho)(states)
-  }
-
-  def average(updates: RDD[Vector]): Vector = {
-    updates.reduce(_ + _) / updates.count
   }
 
   def objective(state: ADMMState)(weights: Vector): Double = {
