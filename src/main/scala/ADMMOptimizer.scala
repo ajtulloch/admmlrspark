@@ -146,20 +146,16 @@ class ADMMOptimizer(
     average(finalStates.map(_.x)).elements
   }
 
-  private def runRound(states: RDD[ADMMState]): RDD[ADMMState] =
+  private def runRound(states: RDD[ADMMState]): RDD[ADMMState] = {
     // run the updates sequentially. Note that the xUpdate and uUpdate
     // happen in parallel, while the zUpdate collects the xUpdates
     // from the mappers.
-    (xUpdate _ andThen zUpdate _ andThen uUpdate _)(states)
+    val xUpdate = (s: RDD[ADMMState]) => s.map(updater.xUpdate)
+    val zUpdate = (s: RDD[ADMMState]) => updater.zUpdate(s)
+    val uUpdate = (s: RDD[ADMMState]) => s.map(updater.uUpdate)
 
-  private def xUpdate(states: RDD[ADMMState]): RDD[ADMMState] =
-    states.map(updater.xUpdate)
-
-  private def zUpdate(states: RDD[ADMMState]): RDD[ADMMState] =
-    updater.zUpdate(states)
-
-  private def uUpdate(states: RDD[ADMMState]): RDD[ADMMState] =
-    states.map(updater.uUpdate)
+    (xUpdate andThen zUpdate andThen uUpdate)(states)
+  }
 }
 
 object ADMMOptimizer {
