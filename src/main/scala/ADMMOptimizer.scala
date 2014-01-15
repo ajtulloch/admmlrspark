@@ -98,13 +98,13 @@ class ADMMOptimizer(
         val scaledLabel = 2 * zeroOnelabel - 1
         new LabeledPoint(scaledLabel, features)
       }}
-    
+
       .groupBy{lp => {
-        // map each data point to a given ADMM partition 
+        // map each data point to a given ADMM partition
         lp.hashCode() % numPartitions
       }}
       .map{case (_, points) => ADMMState(points, initialWeights) }
-     
+
     // Run numIterations of runRound
     val finalStates = (1 to numIterations)
       .foldLeft(admmStates)((s, _) => runRound(s))

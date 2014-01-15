@@ -25,14 +25,11 @@ class ADMMSpecification extends PropSpec with GeneratorDrivenPropertyChecks {
   }
 
   property("shrinkage is implemented correctly") {
-    forAll (shrinkageParams) { (pair: (Double, Double)) =>
-      val (kappa, v) = pair
-      val calculated = if (v > kappa)
-        v - kappa
-      else if (abs(v) <= kappa)
-        0
-      else
-        v + kappa
+    forAll (shrinkageParams) { (kv: (Double, Double)) =>
+      val (kappa, v) = kv
+      val calculated =
+        if (v > kappa) v - kappa else if (abs(v) <= kappa) 0 else v + kappa
+
       ADMMOptimizer.shrinkage(kappa)(v) == calculated
     }
   }
@@ -41,12 +38,8 @@ class ADMMSpecification extends PropSpec with GeneratorDrivenPropertyChecks {
 class LogisticRegressionWithADMMCases extends FunSuite with ShouldMatchers {
   test("gradient correct") {
     val state = ADMMState(
-      points = Array(
-        LabeledPoint(label = 1.0, features = Array(1.0))
-      ),
-      x = Vector(0.0),
-      z = Vector(0.0),
-      u = Vector(0.0)
+      points = Array(LabeledPoint(label = 1.0, features = Array(1.0))),
+      initialWeights = Array(0.0)
     )
     val stepSize = 0.05
     val weights = Vector(1.0)
@@ -102,7 +95,7 @@ class LogisticRegressionWithADMMSpecification
   var sc: SparkContext = _
 
   override def beforeAll() {
-    sc = new SparkContext("local", "test")
+    sc = new SparkContext("local[8]", "test")
   }
 
   override def afterAll() {
@@ -119,7 +112,7 @@ class LogisticRegressionWithADMMSpecification
       (3.0, 3.0)
     )) { (a: Double, b: Double) =>
       val nPoints = 10000
-      val numIterations = 3
+      val numIterations = 5
       val lambda = 0.0
       val rho = 0.000
 
