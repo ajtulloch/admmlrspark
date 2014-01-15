@@ -13,7 +13,7 @@ object Main {
     
     val sc = new SparkContext(args(0), "ADMMLogisticRegression")
     val data = MLUtils.loadLabeledData(sc, args(1))
-    val model = LogisticRegressionWithADMM.train(
+    val model = SparseLogisticRegressionWithADMM.train(
       data,
       args(2).toInt,
       args(3).toDouble,

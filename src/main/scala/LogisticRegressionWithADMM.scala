@@ -6,14 +6,18 @@ import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.mllib.util.DataValidators
 import org.apache.spark.rdd.RDD
 
-class LogisticRegressionWithADMM(
+class SparseLogisticRegressionWithADMM(
   val numIterations: Int,
   val lambda: Double,
   val rho: Double)
     extends GeneralizedLinearAlgorithm[LogisticRegressionModel]
     with Serializable {
 
-  override val optimizer = new ADMMOptimizer(numIterations, lambda, rho)
+  override val optimizer = new ADMMOptimizer(
+    numIterations,
+    lambda,
+    rho,
+    new SparseLogisticRegressionADMMPrimalUpdater(rho, lambda))
 
   override val validators = List(DataValidators.classificationLabels)
 
@@ -24,12 +28,12 @@ class LogisticRegressionWithADMM(
   }
 }
 
-object LogisticRegressionWithADMM {
+object SparseLogisticRegressionWithADMM {
   def train(
     input: RDD[LabeledPoint],
     numIterations: Int,
     lambda: Double,
-    rho: Double): LogisticRegressionModel = {
-    new LogisticRegressionWithADMM(numIterations, lambda, rho).run(input)
+    rho: Double) = {
+    new SparseLogisticRegressionWithADMM(numIterations, lambda, rho).run(input)
   }
 }

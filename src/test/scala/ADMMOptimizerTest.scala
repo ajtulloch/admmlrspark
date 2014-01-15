@@ -41,14 +41,17 @@ class LogisticRegressionWithADMMCases extends FunSuite with ShouldMatchers {
       points = Array(LabeledPoint(label = 1.0, features = Array(1.0))),
       initialWeights = Array(0.0)
     )
+
+    val updater = SparseLogisticRegressionADMMPrimalUpdater(rho = 0.0, lambda = 0.0)
+
     val stepSize = 0.05
     val weights = Vector(1.0)
 
-    val objective = state.objective(0.0)(weights)
-    val grad = state.gradient(0.0)(weights)
+    val objective = updater.objective(state)(weights)
+    val grad = updater.gradient(state)(weights)
 
     val newWeights = stepSize * grad + weights
-    val newObjective = state.objective(0.0)(newWeights)
+    val newObjective = updater.objective(state)(newWeights)
 
     // gradient points in the right direction
     newObjective should be > objective
@@ -120,7 +123,7 @@ class LogisticRegressionWithADMMSpecification
 
       val testRDD = sc.parallelize(testData, 5)
       testRDD.cache()
-      val lr = new LogisticRegressionWithADMM(numIterations, lambda, rho)
+      val lr = new SparseLogisticRegressionWithADMM(numIterations, lambda, rho)
 
       val model = lr.run(testRDD)
 
