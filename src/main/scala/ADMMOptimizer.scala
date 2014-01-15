@@ -13,7 +13,7 @@ import scala.math.{abs, exp, log, log1p, max, min}
 
 /**
  * The state kept on each partition - the data points, and the x,
- * y, u vectors at each iteration
+ * y, u vectors at each iteration.
  */
 case class ADMMState(
   val points: Array[LabeledPoint],
@@ -52,26 +52,30 @@ case class ADMMState(
     min(upper, max(lower, margin))
 
   private def logPhi(margin: Double): Double = {
+    // TODO(tulloch) - do we need to clamp here?
     val t = clampToRange(-10, 10)(margin)
     math.log(1.0 / (1.0 + exp(-t)))
-    // if (t > 0) - math.log(1.0 + exp(-t)) else t - math.log(1 + exp(t)) 
   }
 
   private def phi(margin: Double): Double = {
+    // TODO(tulloch) - do we need to clamp here?
     val t = clampToRange(-10, 10)(margin)
     if (t > 0) 1.0 / (1 + exp(-t)) else exp(t) / (1 + exp(t))
   }
 }
 
 object ADMMState {
-  def apply(points: Array[LabeledPoint]): ADMMState = {
-    val numFeatures = points.head.features.length
+  def apply(points: Seq[LabeledPoint], initialWeights: Array[Double]): ADMMState = {
     new ADMMState(
-      points = points,
-      x = zeroes(numFeatures),
-      z = zeroes(numFeatures),
-      u = zeroes(numFeatures)
+      points = points.toArray,
+      x = Vector(initialWeights),
+      z = zeroes(initialWeights.length),
+      u = zeroes(initialWeights.length)
     )
+  }
+
+  def zeroes(n: Int) = {
+    Vector(Array.fill(n){ 0.0 })
   }
 }
 
@@ -85,29 +89,34 @@ class ADMMOptimizer(
     data: RDD[(Double, Array[Double])],
     initialWeights: Array[Double]): Array[Double] = {
     val numPartitions = data.partitions.length
-    // Hash each datapoint to a partition
 
-    // The input points are 0,1 - we map to (-1, 1) for consistency
-    // with the presentation in
-    // http://www.stanford.edu/~boyd/papers/pdf/admm_distr_stats.pdf
     val admmStates = data
-      .map(p => {
-        val scaledLabel = 2 * p._1 - 1
-        new LabeledPoint(scaledLabel, p._2)
-      })
-      .groupBy(lp => {
+      .map{case(zeroOnelabel, features) => {
+        // The input points are 0,1 - we map to (-1, 1) for consistency
+        // with the presentation in
+        // http://www.stanford.edu/~boyd/papers/pdf/admm_distr_stats.pdf
+        val scaledLabel = 2 * zeroOnelabel - 1
+        new LabeledPoint(scaledLabel, features)
+      }}
+    
+      .groupBy{lp => {
+        // map each data point to a given ADMM partition 
         lp.hashCode() % numPartitions
-      })
-      .map(ip => ADMMState(ip._2.toArray))
+      }}
+      .map{case (_, points) => ADMMState(points, initialWeights) }
      
     // Run numIterations of runRound
-    val finalStates = (1 to numIterations).foldLeft(admmStates)((s, _) => runRound(s))
+    val finalStates = (1 to numIterations)
+      .foldLeft(admmStates)((s, _) => runRound(s))
 
     // return average of final weight vectors across the partitions
     average(finalStates.map(_.x)).elements
   }
 
   private def runRound(states: RDD[ADMMState]): RDD[ADMMState] =
+    // run the updates sequentially. Note that the xUpdate and uUpdate
+    // happen in parallel, while the zUpdate collects the xUpdates
+    // from the mappers.
     (xUpdate _ andThen zUpdate _ andThen uUpdate _)(states)
 
   private def xUpdate(states: RDD[ADMMState]): RDD[ADMMState] =
@@ -115,9 +124,14 @@ class ADMMOptimizer(
 
   private def zUpdate(states: RDD[ADMMState]): RDD[ADMMState] = {
     val numPartitions = states.partitions.length
+    // TODO(tulloch) - is this epsilon > 0 a hack?
     val epsilon = 0.00001 // avoid division by zero for shrinkage
+
+    // TODO(tulloch) - make sure this only sends x, u to the reducer
+    // instead of the full ADMM state.
     val xBar = average(states.map(_.x))
     val uBar = average(states.map(_.u))
+
     val zNew = Vector((xBar + uBar)
       .elements
       .map(shrinkage(lambda / (rho * numPartitions + epsilon))))
@@ -144,6 +158,7 @@ class ADMMOptimizer(
       f,
       state.x // this is the "warm start" approach
     )
+
     state.copy(x = xNew)
   }
 
@@ -157,8 +172,4 @@ object ADMMOptimizer {
   // Eq (4.2) in http://www.stanford.edu/~boyd/papers/pdf/admm_distr_stats.pdf
   def shrinkage(kappa: Double)(v: Double) =
     max(0, v - kappa) - max(0, -v - kappa)
-
-  def zeroes(n: Int) = {
-    Vector(Array.fill(n){ 0.0 })
-  }
 }

@@ -19,7 +19,7 @@ class ADMMSpecification extends PropSpec with GeneratorDrivenPropertyChecks {
 
   property("zeroes is implemented correctly") {
     forAll (positiveInts) { (n: Int) =>
-      val x = ADMMOptimizer.zeroes(n)
+      val x = ADMMState.zeroes(n)
       x.length == n && x.elements.min == 0 && x.elements.max == 0
     }
   }
@@ -59,7 +59,7 @@ class LogisticRegressionWithADMMCases extends FunSuite with ShouldMatchers {
 
     // gradient points in the right direction
     newObjective should be > objective
-    // function is convex
+    // objective function is convex.
     newObjective should be > (objective + grad(0) * stepSize)
   }
 }
@@ -72,6 +72,7 @@ class LogisticRegressionWithADMMSpecification
     with GeneratorDrivenPropertyChecks {
 
   // Generate input of the form Y = logistic(offset + scale*X)
+  // Copypasta'd from the Spark LogisticRegressionSuite.scala
   def generateLogisticInput(
       offset: Double,
       scale: Double,
@@ -97,9 +98,6 @@ class LogisticRegressionWithADMMSpecification
     val testData = (0 until nPoints).map(i => LabeledPoint(y(i), Array(x1(i))))
     testData
   }
-
-  def near(eps: Double)(actual: Double, expected: Double): Boolean =
-    abs(actual - expected) < eps
 
   var sc: SparkContext = _
 
@@ -133,9 +131,9 @@ class LogisticRegressionWithADMMSpecification
 
       val model = lr.run(testRDD)
 
-      // Test the weights
-      model.intercept should be (a plusOrMinus (max(0.03, a * 0.05)))
-      model.weights(0) should be (b plusOrMinus (max(0.03, b * 0.05)))
+      val near = (v: Double) => v plusOrMinus(max(0.05, v * 0.05))
+      model.intercept should be (near(a))
+      model.weights(0) should be (near(b))
     }
   }
 }
