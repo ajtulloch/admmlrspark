@@ -30,7 +30,7 @@ class ADMMSpecification extends PropSpec with GeneratorDrivenPropertyChecks {
       val calculated =
         if (v > kappa) v - kappa else if (abs(v) <= kappa) 0 else v + kappa
 
-      ADMMOptimizer.shrinkage(kappa)(v) == calculated
+      ADMMUpdater.shrinkage(kappa)(v) == calculated
     }
   }
 }

@@ -37,20 +37,7 @@ case class SparseLogisticRegressionADMMPrimalUpdater(
   }
 
   def zUpdate(states: RDD[ADMMState]): RDD[ADMMState] = {
-    val numStates = states.count
-    // TODO(tulloch) - is this epsilon > 0 a hack?
-    val epsilon = 0.00001 // avoid division by zero for shrinkage
-
-    // TODO(tulloch) - make sure this only sends x, u to the reducer
-    // instead of the full ADMM state.
-    val xBar = average(states.map(_.x))
-    val uBar = average(states.map(_.u))
-
-    val zNew = Vector((xBar + uBar)
-      .elements
-      .map(shrinkage(lambda / (rho * numStates + epsilon))))
-
-    states.map(_.copy(z = zNew))
+    ADMMUpdater.linearZUpdate(lambda = lambda, rho = rho)(states)
   }
 
   def average(updates: RDD[Vector]): Vector = {

@@ -109,22 +109,8 @@ case class LassoRegressionADMMUpdater(
     state.copy(x = x_0 + Vector(ridgeSolution.weights))
   }
 
-  def zUpdate(states: RDD[ADMMState]): RDD[ADMMState] = {
-    val numStates = states.count
-    // TODO(tulloch) - is this epsilon > 0 a hack?
-    val epsilon = 0.00001 // avoid division by zero for shrinkage
-
-    // TODO(tulloch) - make sure this only sends x, u to the reducer
-    // instead of the full ADMM state.
-    val xBar = average(states.map(_.x))
-    val uBar = average(states.map(_.u))
-
-    val zNew = Vector((xBar + uBar)
-      .elements
-      .map(shrinkage(lambda / (rho * numStates + epsilon))))
-
-    states.map(state => state.copy(z = zNew))
-  }
+  def zUpdate(states: RDD[ADMMState]): RDD[ADMMState] =
+    ADMMUpdater.linearZUpdate(lambda = lambda, rho = rho)(states)
 }
 
 class ADMMOptimizer(
@@ -174,14 +160,10 @@ class ADMMOptimizer(
 
   private def uUpdate(states: RDD[ADMMState]): RDD[ADMMState] =
     states.map(updater.uUpdate)
-    
-
 }
 
 object ADMMOptimizer {
   // Eq (4.2) in http://www.stanford.edu/~boyd/papers/pdf/admm_distr_stats.pdf
-  def shrinkage(kappa: Double)(v: Double) =
-    max(0, v - kappa) - max(0, -v - kappa)
 
   // Given an RDD list of vectors, computes the component-wise average vector.
   def average(updates: RDD[Vector]): Vector = {
