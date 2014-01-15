@@ -1,20 +1,13 @@
 package com.tulloch.admmlrspark
 
-import DenseVectorImplicits._
-import breeze.linalg.DenseVector
-import breeze.optimize.{DiffFunction, LBFGS}
-import org.apache.spark.Logging
-import org.apache.spark.SparkContext
 import org.apache.spark.mllib.optimization.Optimizer
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.rdd.RDD
-import org.apache.spark.util.Vector
-import scala.math.{abs, exp, log, log1p, max, min, pow}
 
 class ADMMOptimizer(
   val numIterations: Int,
   val updater: ADMMUpdater)
-    extends Optimizer with Logging with Serializable {
+    extends Optimizer with Serializable {
 
   override def optimize(
     data: RDD[(Double, Array[Double])],

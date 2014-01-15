@@ -3,9 +3,7 @@ package com.tulloch.admmlrspark
 import DenseVectorImplicits._
 import breeze.linalg.DenseVector
 import breeze.optimize.{DiffFunction, LBFGS}
-import org.apache.spark.mllib.classification.LogisticRegressionModel
 import org.apache.spark.mllib.classification.SVMModel
-import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.mllib.regression.{GeneralizedLinearAlgorithm, LabeledPoint}
 import org.apache.spark.mllib.util.DataValidators
 import org.apache.spark.rdd.RDD
