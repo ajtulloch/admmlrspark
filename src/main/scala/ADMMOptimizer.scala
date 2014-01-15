@@ -24,96 +24,6 @@ trait ADMMPrimalUpdater {
   }
 }
 
-object ADMMPrimalUpdater {
-}
-
-
-case class SparseLogisticRegressionADMMPrimalUpdater(
-  rho: Double,
-  lambda: Double,
-  lbfgsMaxNumIterations: Int = 5,
-  lbfgsHistory: Int = 10,
-  lbfgsTolerance: Double = 1E-4) extends ADMMPrimalUpdater {
-
-  // TODO(tulloch) - it would be nice to have relative tolerance and
-  // absolute tolerance here.
-
-  def xUpdate(state: ADMMState): ADMMState = {
-      // Our convex objective function that we seek to optimize
-    val f = new DiffFunction[DenseVector[Double]] {
-      def calculate(x: DenseVector[Double]) = {
-        (objective(state)(x), gradient(state)(x))
-      }
-    }
-
-    val lbfgs = new LBFGS[DenseVector[Double]](
-      maxIter = lbfgsMaxNumIterations,
-      m = lbfgsHistory,
-      tolerance = lbfgsTolerance)
-
-    val xNew = lbfgs.minimize(f, state.x) // this is the "warm start" approach
-    state.copy(x = xNew)
-  }
-
-    def zUpdate(states: RDD[ADMMState]): RDD[ADMMState] = {
-    val numPartitions = states.partitions.length
-    // TODO(tulloch) - is this epsilon > 0 a hack?
-    val epsilon = 0.00001 // avoid division by zero for shrinkage
-
-    // TODO(tulloch) - make sure this only sends x, u to the reducer
-    // instead of the full ADMM state.
-    val xBar = average(states.map(_.x))
-    val uBar = average(states.map(_.u))
-
-    val zNew = Vector((xBar + uBar)
-      .elements
-      .map(shrinkage(lambda / (rho * numPartitions + epsilon))))
-
-    states.map(state => state.copy(z = zNew))
-  }
-
-  def objective(state: ADMMState)(weights: Vector): Double = {
-    val lossObjective = state.points
-      .map(lp => {
-        val margin = lp.label * (weights dot Vector(lp.features))
-        -logPhi(margin)
-      })
-      .sum
-
-    val regularizerObjective = (weights - state.z + state.u).squaredNorm
-    val totalObjective = lossObjective + rho / 2 * regularizerObjective
-    totalObjective
-  }
-
-  def gradient(state: ADMMState)(weights: Vector): Vector = {
-    val lossGradient = state.points
-      .map(lp => {
-        val margin = lp.label * (weights dot Vector(lp.features))
-        lp.label * Vector(lp.features) * (phi(margin) - 1)
-      })
-      .reduce(_ + _)
-
-    val regularizerGradient = 2 * (weights - state.z + state.u)
-    val totalGradient = lossGradient + rho / 2 * regularizerGradient
-    totalGradient
-  }
-
-  private def clampToRange(lower: Double, upper: Double)(margin: Double): Double =
-    min(upper, max(lower, margin))
-
-  private def logPhi(margin: Double): Double = {
-    // TODO(tulloch) - do we need to clamp here?
-    val t = clampToRange(-10, 10)(margin)
-    math.log(1.0 / (1.0 + exp(-t)))
-  }
-
-  private def phi(margin: Double): Double = {
-    // TODO(tulloch) - do we need to clamp here?
-    val t = clampToRange(-10, 10)(margin)
-    if (t > 0) 1.0 / (1 + exp(-t)) else exp(t) / (1 + exp(t))
-  }
-}
-
 case class SVMADMMPrimalUpdater(
   rho: Double,
   cee: Double,
@@ -140,10 +50,15 @@ case class SVMADMMPrimalUpdater(
   }
 
   def zUpdate(states: RDD[ADMMState]): RDD[ADMMState] = {
-    states
+    val numerator = states.map(state => state.x + state.u).reduce(_ + _)
+    val denominator = states.count + 1.0 / rho
+    val newZ = numerator / denominator
+    states.map(_.copy(z = newZ))
   }
 
   def objective(state: ADMMState)(x: Vector): Double = {
+    // Eq (12) in
+    // http:web.eecs.umich.edu/~honglak/aistats12-admmDistributedSVM.pdf
     val v = state.z - state.u
     val regularizer = (x - v).squaredNorm
     val loss = state.points
@@ -156,6 +71,8 @@ case class SVMADMMPrimalUpdater(
   }
 
   def gradient(state: ADMMState)(x: Vector): Vector = {
+    // Eq (20) in
+    // http:web.eecs.umich.edu/~honglak/aistats12-admmDistributedSVM.pdf
     val v = state.z - state.u
     val regularizer = x - v
 
@@ -205,7 +122,7 @@ case class LassoRegressionADMMPrimalUpdater(
   }
 
   def zUpdate(states: RDD[ADMMState]): RDD[ADMMState] = {
-    val numPartitions = states.partitions.length
+    val numStates = states.count
     // TODO(tulloch) - is this epsilon > 0 a hack?
     val epsilon = 0.00001 // avoid division by zero for shrinkage
 
@@ -216,7 +133,7 @@ case class LassoRegressionADMMPrimalUpdater(
 
     val zNew = Vector((xBar + uBar)
       .elements
-      .map(shrinkage(lambda / (rho * numPartitions + epsilon))))
+      .map(shrinkage(lambda / (rho * numStates + epsilon))))
 
     states.map(state => state.copy(z = zNew))
   }
@@ -224,8 +141,6 @@ case class LassoRegressionADMMPrimalUpdater(
 
 class ADMMOptimizer(
   val numIterations: Int,
-  val lambda: Double,
-  val rho: Double,
   val updater: ADMMPrimalUpdater)
     extends Optimizer with Logging with Serializable {
 
