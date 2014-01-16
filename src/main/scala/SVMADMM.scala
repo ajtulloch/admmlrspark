@@ -7,6 +7,7 @@ import org.apache.spark.mllib.classification.SVMModel
 import org.apache.spark.mllib.regression.{GeneralizedLinearAlgorithm, LabeledPoint}
 import org.apache.spark.mllib.util.DataValidators
 import org.apache.spark.rdd.RDD
+import org.apache.spark.Logging
 import org.apache.spark.util.Vector
 
 case class SVMADMMUpdater(
@@ -14,7 +15,7 @@ case class SVMADMMUpdater(
   cee: Double,
   lbfgsMaxNumIterations: Int = 5,
   lbfgsHistory: Int = 10,
-  lbfgsTolerance: Double = 1E-4) extends ADMMUpdater {
+  lbfgsTolerance: Double = 1E-4) extends ADMMUpdater with Logging {
 
   def xUpdate(state: ADMMState): ADMMState = {
     // Our convex objective function that we seek to optimize
@@ -35,7 +36,7 @@ case class SVMADMMUpdater(
 
   def zUpdate(states: RDD[ADMMState]): RDD[ADMMState] = {
     val numerator = states.map(state => state.x + state.u).reduce(_ + _)
-    val denominator = states.count + 1.0 / rho
+    val denominator = states.count + (1.0 / rho)
     val newZ = numerator / denominator
     states.map(_.copy(z = newZ))
   }
@@ -44,34 +45,47 @@ case class SVMADMMUpdater(
     // Eq (12) in
     // http:web.eecs.umich.edu/~honglak/aistats12-admmDistributedSVM.pdf
     val v = state.z - state.u
-    val regularizer = (weights - v).squaredNorm
-    val loss = state.points
-      .map{ case LabeledPoint(label, features) => {
-        math.pow(math.max(1.0 - label * (weights dot Vector(features)), 0), 2)
+    val regularizerObjective = (weights - v).squaredNorm
+    val lossObjective = state.points
+      .map{case LabeledPoint(label, features) => {
+        val margin = math.max(1.0 - label * (weights dot Vector(features)), 0)
+        logDebug("w: %s, label: %s, features: %s, margin: %s".format(weights, label, Vector(features), margin))
+        math.pow(margin, 2)
       }}
       .sum
 
-    cee * loss + rho / 2 * regularizer
+    val totalObjective = cee * lossObjective + rho / 2 * regularizerObjective
+    logInfo("w: %s, Loss Objective: %s, Regularizer Objective: %s, Total Objective: %s".format(
+      weights, lossObjective, regularizerObjective, totalObjective, regularizerObjective))
+    totalObjective
   }
 
   def gradient(state: ADMMState)(weights: Vector): Vector = {
     // Eq (20) in
     // http:web.eecs.umich.edu/~honglak/aistats12-admmDistributedSVM.pdf
     val v = state.z - state.u
-    val regularizer = weights - v
+    val regularizerGradient = weights - v
 
-    val loss = state.points.map{ case LabeledPoint(label, features) => {
-      val margin = math.max(1.0 - label * (weights dot Vector(features)), 0)
-      if (margin <= 0) {
-        ADMMState.zeroes(weights.length)
-      } else {
-        // \sum (x x^T) * weights
-        (Vector(features) * (weights dot Vector(features))) - label * Vector(features)
-      }
-    }}
-    .reduce(_ + _)
+    val lossGradient = state.points
+      .map{case LabeledPoint(label, features) => {
+        val margin = math.max(1.0 - label * (weights dot Vector(features)), 0)
+        val gradient =
+          if (margin <= 0) {
+            ADMMState.zeroes(weights.length)
+          } else {
+            // \sum (x x^T) * weights
+            (Vector(features) * (weights dot Vector(features))) - label * Vector(features)
+          }
+        logDebug("w: %s, label: %s, features: %s, margin: %s, gradient: %s".format(weights, label, Vector(features), margin, gradient))
+        gradient
 
-    rho * regularizer - 2 * cee * loss
+      }}
+      .reduce(_ + _)
+    val totalGradient = rho * regularizerGradient + 2 * cee * lossGradient
+        logInfo("w: %s, Loss Gradient: %s, Regularizer Gradient: %s, Total Gradient: %s".format(
+      weights, lossGradient, regularizerGradient, totalGradient, regularizerGradient))
+
+    totalGradient
   }
 }
 

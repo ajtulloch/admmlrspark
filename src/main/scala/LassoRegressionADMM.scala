@@ -15,8 +15,9 @@ case class LassoRegressionADMMUpdater(
   lambda: Double,
   rho: Double,
   sc: SparkContext,
+  ridgeNumIterations: Int,
   ridgeNumPartitions: Int,
-  ridgeNumIterations: Int) extends ADMMUpdater {
+  ridgeStepSize: Double) extends ADMMUpdater {
   def xUpdate(state: ADMMState): ADMMState = {
     // Section (8.2.1) from
     //http://www.stanford.edu/~boyd/papers/pdf/admm_distr_stats.pdf
@@ -25,8 +26,8 @@ case class LassoRegressionADMMUpdater(
     // let z = x - x_0
     // ||A(z + x_0) - b||^2 + lambda ||z||^2
     // ||A(z) + (b - Ax_0)||^2 = lambda ||z||^2
-    // -> z = (A^T A + lambdaI)^-1 (A^T (b - Ax_0))
-    // -> x = x_0 + (A^T A + lambdaI)^-1 (A^T (b - Ax_0))
+    // -> z = (A^T A + lambda I)^-1 (A^T (b - Ax_0))
+    // -> x = x_0 + (A^T A + lambda I)^-1 (A^T (b - Ax_0))
     
     val x_0 = state.z - state.u
     val adjustedData = state.points.map{case LabeledPoint(label, features) =>
@@ -38,7 +39,12 @@ case class LassoRegressionADMMUpdater(
     }
 
     val ridgeRegressionData = sc.makeRDD(state.points, ridgeNumPartitions)
-    val ridgeSolution = RidgeRegressionWithSGD.train(ridgeRegressionData, ridgeNumIterations)
+    val ridgeSolution =
+      RidgeRegressionWithSGD.train(
+        input = ridgeRegressionData,
+        stepSize = ridgeStepSize,
+        numIterations = ridgeNumIterations,
+        regParam = rho)
     state.copy(x = x_0 + Vector(ridgeSolution.weights))
   }
 
@@ -51,14 +57,15 @@ class LassoRegressionWithADMM(
   lambda: Double,
   rho: Double,
   sc: SparkContext,
+  ridgeNumIterations: Int,
   ridgeNumPartitions: Int,
-  ridgeNumIterations: Int)
+  ridgeStepSize: Int)
     extends GeneralizedLinearAlgorithm[LassoModel]
     with Serializable {
 
   override val optimizer = new ADMMOptimizer(
     numIterations,
-    new LassoRegressionADMMUpdater(lambda, rho, sc, ridgeNumPartitions, ridgeNumIterations))
+    new LassoRegressionADMMUpdater(lambda, rho, sc, ridgeNumIterations, ridgeNumPartitions, ridgeStepSize))
 
   def createModel(weights: Array[Double], intercept: Double) =
     new LassoModel(weights, intercept)
@@ -70,8 +77,9 @@ object LassoRegressionWithADMM {
     numIterations: Int,
     lambda: Double,
     rho: Double,
+    ridgeNumIterations: Int,
     ridgeNumPartitions: Int,
-    ridgeNumIterations: Int) =
+    ridgeStepSize: Int) =
     new LassoRegressionWithADMM(
-      numIterations, lambda, rho, input.sparkContext, ridgeNumPartitions, ridgeNumIterations).run(input)
+      numIterations, lambda, rho, input.sparkContext, ridgeNumIterations, ridgeNumPartitions, ridgeStepSize).run(input)
 }
